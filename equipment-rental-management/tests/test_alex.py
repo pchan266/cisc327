@@ -117,3 +117,29 @@ def test_lookup_rentals_filters_by_equipment(client):
     result = client.get(f"/rentals?equipment_id={bike['id']}").get_json()
     assert len(result) == 1
     assert result[0]["equipment_id"] == bike["id"]
+# Check out equipment 
+ 
+def test_checkout_reduces_available_units(client):
+    equip = make_equipment(client, units=2)
+    renter = make_renter(client)
+    resp = client.post(
+        "/rentals", json={"equipment_id": equip["id"], "renter_id": renter["id"]}
+    )
+    assert resp.status_code == 201
+    rental = resp.get_json()
+    assert rental["equipment_id"] == equip["id"]
+    assert rental["renter_id"] == renter["id"]
+    after = client.get(f"/equipment/{equip['id']}").get_json()
+    assert after["available_units"] == 1
+ 
+ 
+def test_checkout_rental_appears_in_rentals_list(client):
+    equip = make_equipment(client, units=1)
+    renter = make_renter(client)
+    created = client.post(
+        "/rentals", json={"equipment_id": equip["id"], "renter_id": renter["id"]}
+    ).get_json()
+    rentals = client.get("/rentals").get_json()
+    assert len(rentals) == 1
+    assert rentals[0]["id"] == created["id"]
+    assert rentals[0].get("return_date") is None
