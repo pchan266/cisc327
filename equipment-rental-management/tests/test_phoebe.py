@@ -207,7 +207,7 @@ def test_update_equipment_nonexistent_id_returns_404(client):
     assert response.status_code == 404
     assert response.get_json() == {"error": "Equipment not found"}
 
-#Feature 6: Delete an equipment item
+#Feature 5: Delete an equipment item
 def test_delete_equipment_removes_item_from_get_and_list(client):
     item = make_equipment(client)
  
@@ -253,3 +253,67 @@ def test_ui_delete_of_nonexistent_equipment_does_not_error(client):
     response = client.post("/ui/equipment/9999/delete", follow_redirects=True)
     assert response.status_code == 200
     assert len(client.get("/equipment").get_json()) == 1
+
+# Feature 6: Set equipment in/out of service
+def test_set_status_out_of_service_and_back_persists(client):
+    item = make_equipment(client)
+    url = f"/equipment/{item['id']}/status"
+ 
+    out = client.patch(url, json={"is_available": False})
+    assert out.status_code == 200
+    assert out.get_json()["is_available"] is False
+    assert client.get(f"/equipment/{item['id']}").get_json()["is_available"] is False
+ 
+    back = client.patch(url, json={"is_available": True})
+    assert back.get_json()["is_available"] is True
+    assert client.get(f"/equipment/{item['id']}").get_json()["is_available"] is True
+ 
+ 
+def test_set_status_does_not_change_unit_counts_or_other_fields(client):
+    item = make_equipment(client, name="Kayak", total_units=3)
+ 
+    client.patch(f"/equipment/{item['id']}/status", json={"is_available": False})
+ 
+    fetched = client.get(f"/equipment/{item['id']}").get_json()
+    assert fetched["name"] == "Kayak"
+    assert fetched["total_units"] == 3
+    assert fetched["available_units"] == 3
+ 
+ 
+def test_set_status_only_affects_the_targeted_item(client):
+    first = make_equipment(client, name="First")
+    second = make_equipment(client, name="Second")
+ 
+    client.patch(f"/equipment/{first['id']}/status", json={"is_available": False})
+ 
+    assert client.get(f"/equipment/{second['id']}").get_json()["is_available"] is True
+ 
+ 
+def test_set_status_nonexistent_id_returns_404(client):
+    response = client.patch("/equipment/9999/status", json={"is_available": False})
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Equipment not found"}
+ 
+ 
+def test_set_status_missing_field_returns_400(client):
+    """DOCUMENTED DEFECT: the handler reads data["is_available"] directly, so
+    a body without it raises KeyError (HTTP 500) instead of a 400 response."""
+    item = make_equipment(client)
+    response = client.patch(f"/equipment/{item['id']}/status", json={})
+    assert response.status_code == 400
+ 
+ 
+def test_out_of_service_equipment_cannot_be_checked_out(client):
+    """DOCUMENTED DEFECT (R22, R23): once flagged out of service, checkout must
+    be refused and the unit count must not change. checkout_equipment() never
+    checks is_available, so the rental is created (201)."""
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+    client.patch(f"/equipment/{item['id']}/status", json={"is_available": False})
+ 
+    response = client.post(
+        "/rentals", json={"equipment_id": item["id"], "renter_id": renter["id"]}
+    )
+ 
+    assert response.status_code == 400
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 2
