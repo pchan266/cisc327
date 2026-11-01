@@ -2,6 +2,15 @@ def make_renter(client, name="A B", email="ab@example.com"):
     resp = client.post("/renters", json={"name": name, "email": email})
     assert resp.status_code == 201
     return resp.get_json()
+
+def make_equipment(client, name="Kayak 1", category="kayak", units=1):
+    resp = client.post(
+        "/equipment",
+        json={"name": name, "category": category, "total_units": units},
+    )
+    assert resp.status_code == 201
+    return resp.get_json()
+
 # list all renters
 def test_list_renters_empty_initially(client):
     resp = client.get("/renters")
@@ -69,3 +78,42 @@ def test_update_renter_email_persists(client):
     after = client.get(f"/renters/{renter['id']}").get_json()
     assert after["email"] == "new@example.com"
     assert after["name"] == "Ann"
+
+# Delete a renter
+ 
+def test_delete_renter_removes_it(client):
+    renter = make_renter(client)
+    assert client.delete(f"/renters/{renter['id']}").status_code in (200, 204)
+    assert client.get(f"/renters/{renter['id']}").status_code == 404
+ 
+ 
+def test_delete_renter_leaves_others_intact(client):
+    ann = make_renter(client, "Ann", "ann@example.com")
+    bob = make_renter(client, "Bob", "bob@example.com")
+    client.delete(f"/renters/{ann['id']}")
+    remaining = client.get("/renters").get_json()
+    assert [r["id"] for r in remaining] == [bob["id"]]
+ 
+ 
+#  Look up rentals by renter or equipment
+ 
+def test_lookup_rentals_filters_by_renter(client):
+    e1 = make_equipment(client, "Kayak", units=2)
+    r1 = make_renter(client, "Ann", "a@example.com")
+    r2 = make_renter(client, "Bob", "b@example.com")
+    client.post("/rentals", json={"equipment_id": e1["id"], "renter_id": r1["id"]})
+    client.post("/rentals", json={"equipment_id": e1["id"], "renter_id": r2["id"]})
+    result = client.get(f"/rentals?renter_id={r1['id']}").get_json()
+    assert len(result) == 1
+    assert result[0]["renter_id"] == r1["id"]
+ 
+ 
+def test_lookup_rentals_filters_by_equipment(client):
+    kayak = make_equipment(client, "Kayak", units=2)
+    bike = make_equipment(client, "Bike", "bike", units=2)
+    renter = make_renter(client)
+    client.post("/rentals", json={"equipment_id": kayak["id"], "renter_id": renter["id"]})
+    client.post("/rentals", json={"equipment_id": bike["id"], "renter_id": renter["id"]})
+    result = client.get(f"/rentals?equipment_id={bike['id']}").get_json()
+    assert len(result) == 1
+    assert result[0]["equipment_id"] == bike["id"]
