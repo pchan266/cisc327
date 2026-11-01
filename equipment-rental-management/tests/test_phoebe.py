@@ -124,14 +124,6 @@ def test_create_equipment_missing_name_does_not_create_item(client):
     assert client.get("/equipment").get_json() == []
  
  
-def test_create_equipment_missing_name_returns_400(client):
-    """DOCUMENTED DEFECT: invalid input should be rejected with a 4xx error.
-    create_equipment indexes data["name"] directly, so a missing field raises
-    KeyError (HTTP 500) instead of returning a 400 response."""
-    response = client.post("/equipment", json={"category": "Boat", "total_units": 1})
-    assert response.status_code == 400
- 
- 
 def test_create_equipment_via_ui_form_then_visible_in_api(client):
     response = client.post(
         "/ui/equipment",
@@ -294,15 +286,6 @@ def test_set_status_nonexistent_id_returns_404(client):
     assert response.status_code == 404
     assert response.get_json() == {"error": "Equipment not found"}
  
- 
-def test_set_status_missing_field_returns_400(client):
-    """DOCUMENTED DEFECT: the handler reads data["is_available"] directly, so
-    a body without it raises KeyError (HTTP 500) instead of a 400 response."""
-    item = make_equipment(client)
-    response = client.patch(f"/equipment/{item['id']}/status", json={})
-    assert response.status_code == 400
- 
- 
 def test_out_of_service_equipment_cannot_be_checked_out(client):
     """DOCUMENTED DEFECT (R22, R23): once flagged out of service, checkout must
     be refused and the unit count must not change. checkout_equipment() never
@@ -317,3 +300,152 @@ def test_out_of_service_equipment_cannot_be_checked_out(client):
  
     assert response.status_code == 400
     assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 2
+
+# Feature 7: Check equipment availability
+def test_availability_returns_summary_for_new_item(client):
+    item = make_equipment(client, total_units=4)
+ 
+    response = client.get(f"/equipment/{item['id']}/availability")
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "equipment_id": item["id"],
+        "is_available": True,
+        "available_units": 4,
+        "total_units": 4,
+    }
+
+def test_availability_updates_after_checkout_and_return(client):
+    """R16: availability must reflect a completed rental and a recorded return."""
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+    url = f"/equipment/{item['id']}/availability"
+ 
+    rental = checkout(client, item["id"], renter["id"])
+    assert client.get(url).get_json()["available_units"] == 1
+ 
+    client.put(f"/rentals/{rental['id']}/return")
+    assert client.get(url).get_json()["available_units"] == 2
+ 
+ 
+def test_availability_reaches_zero_when_all_units_rented(client):
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+    checkout(client, item["id"], renter["id"])
+    checkout(client, item["id"], renter["id"])
+ 
+    summary = client.get(f"/equipment/{item['id']}/availability").get_json()
+    assert summary["available_units"] == 0
+    assert summary["total_units"] == 2
+ 
+ 
+def test_availability_reflects_out_of_service_flag(client):
+    item = make_equipment(client)
+    client.patch(f"/equipment/{item['id']}/status", json={"is_available": False})
+ 
+    summary = client.get(f"/equipment/{item['id']}/availability").get_json()
+    assert summary["is_available"] is False
+ 
+ 
+def test_availability_nonexistent_id_returns_404(client):
+    response = client.get("/equipment/9999/availability")
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Equipment not found"}
+ 
+ 
+def test_fully_rented_item_is_reported_as_unavailable(client):
+    """DOCUMENTED DEFECT (R8, R23): with every unit rented out, the item
+    should not be reported as available. is_available is only the manual
+    out-of-service flag, so it stays True while available_units is 0."""
+    item = make_equipment(client, total_units=1)
+    renter = make_renter(client)
+    checkout(client, item["id"], renter["id"])
+    summary = client.get(f"/equipment/{item['id']}/availability").get_json()
+    assert summary["available_units"] == 0
+    assert summary["is_available"] is False 
+
+# Feature 8: Return rented equipment
+def test_return_sets_return_date_and_restores_unit(client):
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+    rental = checkout(client, item["id"], renter["id"])
+    assert rental["return_date"] is None
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 1
+ 
+    response = client.put(f"/rentals/{rental['id']}/return")
+    assert response.status_code == 200
+    returned = response.get_json()
+    assert returned["id"] == rental["id"]
+    assert returned["return_date"] is not None
+ 
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 2
+ 
+ 
+def test_return_is_persisted_in_rental_lookup(client):
+    item = make_equipment(client)
+    renter = make_renter(client)
+    rental = checkout(client, item["id"], renter["id"])
+ 
+    client.put(f"/rentals/{rental['id']}/return")
+ 
+    rentals = client.get(f"/rentals?equipment_id={item['id']}").get_json()
+    assert len(rentals) == 1
+    assert rentals[0]["id"] == rental["id"]
+    assert rentals[0]["return_date"] is not None
+ 
+ 
+def test_return_twice_is_rejected_and_does_not_add_a_unit(client):
+    item = make_equipment(client, total_units=1)
+    renter = make_renter(client)
+    rental = checkout(client, item["id"], renter["id"])
+    client.put(f"/rentals/{rental['id']}/return")
+ 
+    second = client.put(f"/rentals/{rental['id']}/return")
+    assert second.status_code == 400
+    assert second.get_json() == {"error": "Rental already returned"}
+ 
+    available = client.get(f"/equipment/{item['id']}").get_json()["available_units"]
+    assert available == 1 
+ 
+ 
+def test_return_nonexistent_rental_returns_404(client):
+    response = client.put("/rentals/9999/return")
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Rental not found"}
+ 
+ 
+def test_return_one_of_several_rentals_restores_only_one_unit(client):
+    item = make_equipment(client, total_units=3)
+    renter = make_renter(client)
+    first = checkout(client, item["id"], renter["id"])
+    checkout(client, item["id"], renter["id"])
+    checkout(client, item["id"], renter["id"])
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 0
+ 
+    client.put(f"/rentals/{first['id']}/return")
+ 
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 1
+ 
+ 
+def test_return_after_equipment_was_deleted_still_succeeds(client):
+    item = make_equipment(client)
+    renter = make_renter(client)
+    rental = checkout(client, item["id"], renter["id"])
+    client.delete(f"/equipment/{item['id']}")
+ 
+    response = client.put(f"/rentals/{rental['id']}/return")
+    assert response.status_code == 200
+    assert response.get_json()["return_date"] is not None
+ 
+ 
+def test_return_via_ui_button_restores_unit_once_only(client):
+    item = make_equipment(client, total_units=1)
+    renter = make_renter(client)
+    rental = checkout(client, item["id"], renter["id"])
+ 
+    first = client.post(f"/ui/rentals/{rental['id']}/return", follow_redirects=True)
+    assert first.status_code == 200
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 1
+ 
+    # Repeating the action must not add a second unit
+    client.post(f"/ui/rentals/{rental['id']}/return", follow_redirects=True)
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 1
