@@ -35,3 +35,37 @@ def test_create_renter_stores_phone_number(client):
     )
     renter = client.get(f"/renters/{resp.get_json()['id']}").get_json()
     assert renter.get("phone") == "6135551234"
+# View one renter
+ 
+def test_get_renter_matches_created(client):
+    created = make_renter(client)
+    resp = client.get(f"/renters/{created['id']}")
+    assert resp.status_code == 200
+    assert resp.get_json() == created
+ 
+ 
+def test_get_renter_returns_correct_one_among_many(client):
+    make_renter(client, "Ann", "ann@example.com")
+    bob = make_renter(client, "Bob", "bob@example.com")
+    fetched = client.get(f"/renters/{bob['id']}").get_json()
+    assert fetched["name"] == "Bob"
+    assert fetched["email"] == "bob@example.com"
+ 
+ 
+# Update a renter
+ 
+def test_update_renter_name_persists(client):
+    renter = make_renter(client, "Ann", "ann@example.com")
+    resp = client.put(f"/renters/{renter['id']}", json={"name": "Ann Lee"})
+    assert resp.status_code == 200
+    after = client.get(f"/renters/{renter['id']}").get_json()
+    assert after["name"] == "Ann Lee"
+    assert after["email"] == "ann@example.com"
+ 
+ 
+def test_update_renter_email_persists(client):
+    renter = make_renter(client, "Ann", "ann@example.com")
+    client.put(f"/renters/{renter['id']}", json={"email": "new@example.com"})
+    after = client.get(f"/renters/{renter['id']}").get_json()
+    assert after["email"] == "new@example.com"
+    assert after["name"] == "Ann"
