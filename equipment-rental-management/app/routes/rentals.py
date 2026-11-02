@@ -94,3 +94,37 @@ def release_deposit(rental_id):
 
     # BUG: rental.deposit_released is never set to True here — state is not persisted.
     return jsonify({"rental_id": rental_id, "deposit_released": True})
+
+def _rental_status(rental):
+    if rental.return_date is not None:
+        return "Returned"
+    if rental.due_date < date.today():
+        return "Overdue"
+    return "Rented"
+
+
+def _rental_summary(rental):
+    item = store.equipment.get(rental.equipment_id)
+    renter = store.renters.get(rental.renter_id)
+    data = rental.to_dict()
+    data["status"] = _rental_status(rental)
+    data["equipment_name"] = item.name if item else None
+    data["renter_name"] = renter.name if renter else None
+    return data
+
+
+@rentals_bp.route("/active", methods=["GET"])
+def list_active_rentals():
+    """Rentals that are currently out, each flagged Rented or Overdue."""
+    active = [r for r in store.rentals.values() if r.return_date is None]
+    return jsonify([_rental_summary(r) for r in active])
+
+
+@rentals_bp.route("/overdue", methods=["GET"])
+def list_overdue_rentals():
+    """Rentals that are past their due date and not yet returned."""
+    overdue = [
+        r for r in store.rentals.values()
+        if _rental_status(r) == "Overdue"
+    ]
+    return jsonify([_rental_summary(r) for r in overdue])
