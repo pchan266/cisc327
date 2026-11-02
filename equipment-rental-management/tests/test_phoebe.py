@@ -23,6 +23,12 @@ def checkout(client, equipment_id, renter_id):
     )
     assert response.status_code == 201
     return response.get_json()
+    
+def try_checkout(client, equipment_id, renter_id):
+    # Like checkout() but returns the raw response so refusals can be checked
+    return client.post(
+        "/rentals", json={"equipment_id": equipment_id, "renter_id": renter_id}
+    )
  
  # Feature 1: List all equipment
 def test_list_equipment_returns_every_created_item_with_fields(client):
@@ -449,3 +455,71 @@ def test_return_via_ui_button_restores_unit_once_only(client):
     # Repeating the action must not add a second unit
     client.post(f"/ui/rentals/{rental['id']}/return", follow_redirects=True)
     assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 1
+
+# Tests for R23 enhancement
+def test_r23_out_of_service_checkout_refused_with_no_side_effects(client):
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+    client.patch(f"/equipment/{item['id']}/status", json={"is_available": False})
+ 
+    response = try_checkout(client, item["id"], renter["id"])
+ 
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Equipment is out of service"}
+    assert client.get(f"/rentals?equipment_id={item['id']}").get_json() == []
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 2
+ 
+ 
+def test_r23_checkout_refused_when_no_units_left_and_count_never_negative(client):
+    item = make_equipment(client, total_units=1)
+    renter = make_renter(client)
+ 
+    assert try_checkout(client, item["id"], renter["id"]).status_code == 201 
+ 
+    response = try_checkout(client, item["id"], renter["id"])
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "No available units for this equipment"}
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 0
+    assert len(client.get(f"/rentals?equipment_id={item['id']}").get_json()) == 1
+ 
+ 
+def test_r23_checkout_allowed_again_after_return(client):
+    """Chained workflow: rent -> refused -> return -> rent succeeds."""
+    item = make_equipment(client, total_units=1)
+    renter = make_renter(client)
+    rental = checkout(client, item["id"], renter["id"])
+    assert try_checkout(client, item["id"], renter["id"]).status_code == 400
+ 
+    client.put(f"/rentals/{rental['id']}/return")
+ 
+    second = try_checkout(client, item["id"], renter["id"])
+    assert second.status_code == 201
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 0
+ 
+def test_r23_ui_checkout_refused_for_out_of_service_item(client):
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+    client.patch(f"/equipment/{item['id']}/status", json={"is_available": False})
+ 
+    response = client.post(
+        "/ui/rentals", data={"equipment_id": item["id"], "renter_id": renter["id"]}
+    )
+ 
+    assert response.status_code == 400
+    assert client.get("/rentals").get_json() == []
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 2
+ 
+def test_r23_ui_checkout_still_works_for_available_item(client):
+    item = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+ 
+    response = client.post(
+        "/ui/rentals",
+        data={"equipment_id": item["id"], "renter_id": renter["id"]},
+        follow_redirects=True,
+    )
+ 
+    assert response.status_code == 200
+    assert len(client.get("/rentals").get_json()) == 1
+    assert client.get(f"/equipment/{item['id']}").get_json()["available_units"] == 1
+ 

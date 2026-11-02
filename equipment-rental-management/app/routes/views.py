@@ -61,6 +61,21 @@ def rentals_page():
         renter_id = int(request.form["renter_id"])
         item = store.equipment.get(equipment_id)
         if item is not None:
+            error = None
+            if not item.is_available:
+                error = "Equipment is out of service"
+            elif item.available_units <= 0:
+                error = "No available units for this equipment"
+            if error is not None:
+                return (
+                    render_template(
+                        "rentals.html",
+                        rentals=store.rentals.values(),
+                        error=error
+                    ),
+                    400,
+                )
+
             item.available_units -= 1
             rental_id = store.next_id("rental")
             rental = Rental(
