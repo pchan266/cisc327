@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+from app import store
 def make_renter(client, name="A B", email="ab@example.com"):
     resp = client.post("/renters", json={"name": name, "email": email})
     assert resp.status_code == 201
@@ -10,6 +12,13 @@ def make_equipment(client, name="Kayak 1", category="kayak", units=1):
     )
     assert resp.status_code == 201
     return resp.get_json()
+
+def _checkout(client, units=1):
+    equip = make_equipment(client, units=units)
+    renter = make_renter(client)
+    return client.post(
+        "/rentals", json={"equipment_id": equip["id"], "renter_id": renter["id"]}
+    ).get_json()
 
 # list all renters
 def test_list_renters_empty_initially(client):
