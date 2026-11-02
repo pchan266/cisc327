@@ -143,3 +143,35 @@ def test_checkout_rental_appears_in_rentals_list(client):
     assert len(rentals) == 1
     assert rentals[0]["id"] == created["id"]
     assert rentals[0].get("return_date") is None
+
+# Overdue rentals (enhancement for R1)
+
+def test_overdue_endpoint_lists_past_due_rental_with_details(client):
+    rental = _checkout(client)
+    store.rentals[rental["id"]].due_date = date.today() - timedelta(days=2)
+    resp = client.get("/rentals/overdue")
+    assert resp.status_code == 200
+    result = resp.get_json()
+    assert len(result) == 1
+    assert result[0]["id"] == rental["id"]
+    assert result[0]["status"] == "Overdue"
+    assert result[0]["equipment_name"] == "Kayak 1"
+    assert result[0]["renter_name"] == "A B"
+
+
+def test_overdue_endpoint_excludes_on_time_and_returned_rentals(client):
+    on_time = _checkout(client)
+    returned = _checkout(client)
+    store.rentals[returned["id"]].due_date = date.today() - timedelta(days=2)
+    client.put(f"/rentals/{returned['id']}/return")
+    assert client.get("/rentals/overdue").get_json() == []
+    assert on_time["id"] in [r["id"] for r in client.get("/rentals/active").get_json()]
+
+
+def test_active_endpoint_flags_each_rental_rented_or_overdue(client):
+    fresh = _checkout(client)
+    late = _checkout(client)
+    store.rentals[late["id"]].due_date = date.today() - timedelta(days=1)
+    statuses = {r["id"]: r["status"] for r in client.get("/rentals/active").get_json()}
+    assert statuses[fresh["id"]] == "Rented"
+    assert statuses[late["id"]] == "Overdue"
