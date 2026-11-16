@@ -27,10 +27,11 @@ _notifications = []
 def build_overdue_subject(equipment_name: str) -> str:
     return f"{SUBJECT_PREFIX} Overdue rental: {equipment_name}"
 
-def build_overdue_message(equipment_name: str, days_overdue: int) -> str:
+def build_overdue_message(equipment_name: str, renter_name: str, due_date: str) -> str:
     return (
-        f"Hello, Your rental of {equipment_name} is {days_overdue} days overdue."
-        f"Please return it as soon as possible."
+        f"Hello {renter_name},\n\n"
+        f"Your rental of {equipment_name} was due on {due_date} and is now overdue."
+        f"Please return it as soon as possible.\n\n"
         f"Thank you, {SENDER_NAME}"
     )
 
@@ -56,6 +57,7 @@ def send_notification(recipient: str, subject: str, message: str) -> bool:
     if not all(isinstance(value, str) and value.strip()
                for value in (recipient, subject, message)):
         return False
+
 
     if not is_service_available():
         return False
