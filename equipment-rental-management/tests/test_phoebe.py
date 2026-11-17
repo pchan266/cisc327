@@ -233,11 +233,11 @@ def test_equipment_ui_page_lists_items(client):
     assert response.status_code == 200
     assert b"Paddleboard" in response.data
  
- 
+# A3: document failed tests from A2 where test correctly documents behaviour that
+# requirements say should exist but app doesn't do that. Mark test and explain (see report).
+@pytest.mark.xfail( reason="R8: equipment exposes only is_available, no single status field")
+
 def test_equipment_has_single_status_field(client):
-    """DOCUMENTED DEFECT (R8): each item should carry exactly one status of
-    Available, Rented, Overdue or Out of Service. Equipment only exposes an
-    is_available boolean, so there is no status field."""
     item = make_equipment(client)
     assert item.get("status") in {"Available", "Rented", "Overdue", "Out of Service"}
 
@@ -515,11 +515,10 @@ def test_availability_nonexistent_id_returns_404(client):
     assert response.status_code == 404
     assert response.get_json() == {"error": "Equipment not found"}
  
- 
+# A3: document failed tests from A2 where test correctly documents behaviour that
+# requirements say should exist but app doesn't do that. Mark test and explain (see report).
+@pytest.mark.xfail( reason="R8/R23: is_available stays True when available_units is 0")
 def test_fully_rented_item_is_reported_as_unavailable(client):
-    """DOCUMENTED DEFECT (R8, R23): with every unit rented out, the item
-    should not be reported as available. is_available is only the manual
-    out-of-service flag, so it stays True while available_units is 0."""
     item = make_equipment(client, total_units=1)
     renter = make_renter(client)
     checkout(client, item["id"], renter["id"])
