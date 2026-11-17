@@ -157,4 +157,13 @@ def send_overdue_reminder(rental_id):
         build_overdue_message(equipment_name, (renter.name, equipment_name, rental.due_date.isoformat())),
     )
 
-    return jsonify({"rental_id": rental_id, "notification_sent": sent})
+    if not sent:
+        # failure policy: request is valid so respond 200, report failure and leave rental unmarked to be retried
+        return jsonify({
+            "rental_id": rental_id,
+            "notification_sent": False,
+            "message": "Failed to send notification"
+        })
+
+    rental.reminder_sent = True
+    return jsonify({"rental_id": rental_id, "notification_sent": True})

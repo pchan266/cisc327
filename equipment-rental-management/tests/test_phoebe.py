@@ -1,8 +1,9 @@
-'''
-Tests for Table B features 1-8
-Phoebe Chan
-20477667
-'''
+from datetime import date, timedelta
+from unittest.mock import patch
+import pytest
+from app import store
+from notification_service import build_overdue_subject, build_overdue_message
+
 # Helpers
 def make_equipment(client, name="Kayak", category="Boat", total_units=2, **extra):
     payload = {"name": name, "category": category, "total_units": total_units}
@@ -29,8 +30,49 @@ def try_checkout(client, equipment_id, renter_id):
     return client.post(
         "/rentals", json={"equipment_id": equipment_id, "renter_id": renter_id}
     )
- 
- # Feature 1: List all equipment
+
+# A3 Stub and Mock Tests: Send Overdue Reminder Emails
+def make_overdue_rental(client, days_overdue=2):
+    equipment = make_equipment(client)
+    renter = make_renter(client)
+    rental = checkout(client, equipment["id"], renter["id"])
+    store.rentals[rental["id"]].due_date = date.today() - timedelta(days=days_overdue)
+    return rental["id"], equipment, renter
+
+def test_overdue_reminder_success_stub(client, monkeypatch):
+    """Stub returns True: response reports success and rental is marked."""
+    monkeypatch.setattr("app.routes.rentals.send_notification",
+                        lambda recipient, subject, message: True)
+    rental_id, _, _ = make_overdue_rental(client)
+
+    response = client.post(f"/rentals/{rental_id}/overdue_reminder")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"rental_id": rental_id, "notification_sent": True}
+
+    rental = store.rentals[rental_id]
+    assert rental.reminder_sent is True
+    assert rental.return_date is None
+
+def test_overdue_reminder_sends_expected_email_mock(client):
+    """Mock: verifies recipient, subject, message content, and response."""
+    rental_id, equipment, renter = make_overdue_rental(client, days_ovrdue=3)
+    due = store.rentals[rental_id].due_date
+
+    with patch("app.routes.rentals.send_notification",
+               return_value=True) as mock_send:
+        response = client.post(f"/rentals/{rental_id}/overdue_reminder")
+
+    assert response.status_code == 200
+    assert response.get_json()["notification_sent"] is True
+    assert store.rentals[rental_id].reminder_sent is True
+    mock_send.assert_called_once_with(
+        renter["email"],
+        build_overdue_subject(equipment["name"]),
+        build_overdue_message(renter["name"], equipment["name"], due.isoformat()),
+    )
+
+# Feature 1: List all equipment
 def test_list_equipment_returns_every_created_item_with_fields(client):
     make_equipment(client, name="Kayak", category="Boat", total_units=3)
     make_equipment(client, name="Road Bike", category="Bike", total_units=5)
