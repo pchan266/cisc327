@@ -23,6 +23,7 @@ class Rental:
         self.return_date = return_date
         self.deposit_amount = deposit_amount
         self.deposit_released = deposit_released
+        self.reminder_sent = False
 
     def to_dict(self):
         return {

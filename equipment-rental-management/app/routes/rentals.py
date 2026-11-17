@@ -1,3 +1,9 @@
+from notification_service import (
+    send_notification,
+    build_overdue_subject,
+    build_overdue_message,
+)
+
 from datetime import date, timedelta
 
 from flask import Blueprint, jsonify, request
@@ -129,3 +135,35 @@ def list_overdue_rentals():
         if _rental_status(r) == "Overdue"
     ]
     return jsonify([_rental_summary(r) for r in overdue])
+
+@rentals_bp.route("/<int:rental_id>/overdue-reminder", methods=["POST"])
+def send_overdue_reminder(rental_id):
+    rental = store.rentals.get(rental_id)
+    if rental is None:
+        return jsonify({"error": "Rental not found"}), 404
+    if _rental_status(rental) != "Overdue":
+        return jsonify({"error": "Rental is not overdue"}), 400
+
+    renter = store.renters.get(rental.renter_id)
+    if renter is None or not renter.email:
+        return jsonify({"error": "Renter has no email"}), 400
+
+    item = store.equipment.get(rental.equipment_id)
+    equipment_name = item.name if item else "your rented equipment"
+
+    sent = send_notification(
+        renter.email,
+        build_overdue_subject(equipment_name),
+        build_overdue_message(renter.name, equipment_name, rental.due_date.isoformat()),
+    )
+
+    if not sent:
+        # failure policy: request is valid so respond 200, report failure and leave rental unmarked to be retried
+        return jsonify({
+            "rental_id": rental_id,
+            "notification_sent": False,
+            "message": "Failed to send notification"
+        })
+
+    rental.reminder_sent = True
+    return jsonify({"rental_id": rental_id, "notification_sent": True})

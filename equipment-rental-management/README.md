@@ -57,6 +57,7 @@ app working without a REST client, and calls the same in-memory store.
 | GET | `/rentals?renter_id=&equipment_id=` | Look up rentals |
 | GET |	`/rentals/active` | List rentals not yet returned, flagged Rented or Overdue
 | GET |	`/rentals/overdue` | List rentals past their due date and not returned
+| POST | `/rentals/<id>/overdue-reminder` | Email the renter an overdue reminder. Returns 200 with `notification_sent` true or false, 404 if rental is not found, 400 if not overdue or the renter has no email |
 
 ## Tests
 
