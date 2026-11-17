@@ -27,7 +27,7 @@ _notifications = []
 def build_overdue_subject(equipment_name: str) -> str:
     return f"{SUBJECT_PREFIX} Overdue rental: {equipment_name}"
 
-def build_overdue_message(equipment_name: str, renter_name: str, due_date: str) -> str:
+def build_overdue_message(renter_name: str, equipment_name: str, due_date: str) -> str:
     return (
         f"Hello {renter_name},\n\n"
         f"Your rental of {equipment_name} was due on {due_date} and is now overdue."

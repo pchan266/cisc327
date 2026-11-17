@@ -136,7 +136,7 @@ def list_overdue_rentals():
     ]
     return jsonify([_rental_summary(r) for r in overdue])
 
-@rentals_bp.route("/<int: rental_id>/overdue-reminder", methods=["POST"])
+@rentals_bp.route("/<int:rental_id>/overdue-reminder", methods=["POST"])
 def send_overdue_reminder(rental_id):
     rental = store.rentals.get(rental_id)
     if rental is None:
@@ -154,7 +154,7 @@ def send_overdue_reminder(rental_id):
     sent = send_notification(
         renter.email,
         build_overdue_subject(equipment_name),
-        build_overdue_message(equipment_name, (renter.name, equipment_name, rental.due_date.isoformat())),
+        build_overdue_message(renter.name, equipment_name, rental.due_date.isoformat()),
     )
 
     if not sent:

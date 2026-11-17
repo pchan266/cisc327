@@ -30,6 +30,10 @@ def try_checkout(client, equipment_id, renter_id):
     return client.post(
         "/rentals", json={"equipment_id": equipment_id, "renter_id": renter_id}
     )
+def rental_for_extension(client):
+    equipment = make_equipment(client)
+    renter = make_renter(client)
+    return checkout(client, equipment["id"], renter["id"])
 
 # A3 Stub and Mock Tests: Send Overdue Reminder Emails
 def make_overdue_rental(client, days_overdue=2):
@@ -45,7 +49,7 @@ def test_overdue_reminder_success_stub(client, monkeypatch):
                         lambda recipient, subject, message: True)
     rental_id, _, _ = make_overdue_rental(client)
 
-    response = client.post(f"/rentals/{rental_id}/overdue_reminder")
+    response = client.post(f"/rentals/{rental_id}/overdue-reminder")
 
     assert response.status_code == 200
     assert response.get_json() == {"rental_id": rental_id, "notification_sent": True}
@@ -56,12 +60,12 @@ def test_overdue_reminder_success_stub(client, monkeypatch):
 
 def test_overdue_reminder_sends_expected_email_mock(client):
     """Mock: verifies recipient, subject, message content, and response."""
-    rental_id, equipment, renter = make_overdue_rental(client, days_ovrdue=3)
+    rental_id, equipment, renter = make_overdue_rental(client, days_overdue=3)
     due = store.rentals[rental_id].due_date
 
     with patch("app.routes.rentals.send_notification",
                return_value=True) as mock_send:
-        response = client.post(f"/rentals/{rental_id}/overdue_reminder")
+        response = client.post(f"/rentals/{rental_id}/overdue-reminder")
 
     assert response.status_code == 200
     assert response.get_json()["notification_sent"] is True
@@ -72,6 +76,118 @@ def test_overdue_reminder_sends_expected_email_mock(client):
         build_overdue_message(renter["name"], equipment["name"], due.isoformat()),
     )
 
+# A3: Uncovered function - checkout_equipment
+def test_checkout_success_creates_rental_and_decrements_units(client):
+    equipment = make_equipment(client, total_units=2)
+    renter = make_renter(client)
+
+    response = client.post("/rentals", json={
+        "equipment_id": equipment["id"],
+        "renter_id": renter["id"],
+    })
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["equipment_id"] == equipment["id"]
+    assert body["renter_id"] == renter["id"]
+    assert body["return_date"] is None
+    assert body["due_date"] == (date.today() + timedelta(days=7)).isoformat()
+    assert store.equipment[equipment["id"]].available_units == 1
+    assert body["id"] in store.rentals
+
+def test_checkout_unknown_equipment_returns_404(client):
+    renter = make_renter(client)
+
+    response = client.post("/rentals", json={
+        "equipment_id": 9999, "renter_id": renter["id"],
+    })
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Equipment not found"}
+    assert store.rentals == {}
+
+def test_checkout_out_of_service_equipment_returns_400(client):
+    equipment = make_equipment(client)
+    renter = make_renter(client)
+    store.equipment[equipment["id"]].is_available = False
+
+    response = client.post("/rentals", json={
+        "equipment_id": equipment["id"], "renter_id": renter["id"],
+    })
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Equipment is out of service"}
+    assert store.rentals == {}
+    assert store.equipment[equipment["id"]].available_units == 2
+
+def checkout_last_unit_then_no_units_left(client):
+    equipment = make_equipment(client, total_units=1)
+    renter = make_renter(client)
+    checkout(client, equipment["id"], renter["id"])
+    assert store.equipment[equipment["id"]].available_units == 0
+
+    response = client.post("/rentals", json={
+        "equipment_id": equipment["id"], "renter_id": renter["id"],
+    })
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "No available units for this equipment"}
+    assert len(store.rentals) == 1
+    assert store.equipment[equipment["id"]].available_units == 0
+
+# A3: Uncovered function - extend_rental
+def test_extend_rental_by_given_days(client):
+    rental = rental_for_extension(client)
+    original_due = store.rentals[rental["id"]].due_date
+
+    response = client.put(f"/rentals/{rental['id']}/extend", json={"days": 5})
+
+    assert response.status_code == 200
+    expected = (original_due + timedelta(days=5)).isoformat()
+    assert response.get_json()["due_date"] == expected
+    assert store.rentals[rental["id"]].due_date.isoformat() == expected
+
+def test_extend_overdue_rental_makes_it_not_overdue(client):
+    rental = rental_for_extension(client)
+    store.rentals[rental["id"]].due_date = date.today() - timedelta(days=2)
+    assert [r["id"] for r in client.get("/rentals/overdue").get_json()] == [rental["id"]]
+
+    response = client.put(f"/rentals/{rental['id']}/extend", json={"days": 5})
+
+    assert response.status_code == 200
+    assert client.get("/rentals/overdue").get_json() == []
+
+def test_extend_unknown_rental_returns_404(client):
+    response = client.put("/rentals/9999/extend", json={"days": 2})
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Rental not found"}
+
+def test_extend_returned_rental_returns_400_keeps_due_date(client):
+    rental = rental_for_extension(client)
+    client.put(f"/rentals/{rental['id']}/return")
+    due_before = store.rentals[rental["id"]].due_date
+    response = client.put(f"/rentals/{rental['id']}/extend", json={"days": 3})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Rental already returned"}
+    assert store.rentals[rental["id"]].due_date == due_before
+
+# A3: Uncovered function - release_deposit:
+def test_release_deposit_unknown_rental_returns_404(client):
+    response = client.put("/rentals/9999/deposit/release")
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Rental not found"}
+
+def test_release_deposit_before_return_returns_400(client):
+    rental = rental_for_extension(client)
+    response = client.put(f"/rentals/{rental['id']}/deposit/release")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Equipment has not been returned yet"}
+    assert store.rentals[rental["id"]].deposit_released is False
+
+# FROM A2
 # Feature 1: List all equipment
 def test_list_equipment_returns_every_created_item_with_fields(client):
     make_equipment(client, name="Kayak", category="Boat", total_units=3)
