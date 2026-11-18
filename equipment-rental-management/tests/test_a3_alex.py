@@ -117,3 +117,61 @@ def test_update_renter_phone_persists(client):
     after = client.get(f"/renters/{renter['id']}").get_json()
     assert after["phone"] == "6135559999"
     assert after["name"] == renter["name"]
+
+# ---- Coverage-directed: views.py ----
+
+def test_home_page_loads(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.content_type
+    assert len(resp.data) > 0
+
+
+def test_renters_page_form_creates_renter(client):
+    resp = client.post(
+        "/ui/renters", data={"name": "Zed", "email": "zed@example.com"}
+    )
+    assert resp.status_code == 302  # redirects back to the renters page
+    renters = client.get("/renters").get_json()
+    assert len(renters) == 1
+    assert renters[0]["name"] == "Zed"
+    assert renters[0]["email"] == "zed@example.com"
+
+
+def test_renters_page_lists_existing_renters(client):
+    make_renter(client, "Maya", "maya@example.com")
+    resp = client.get("/ui/renters")
+    assert resp.status_code == 200
+    assert b"Maya" in resp.data
+
+
+def test_delete_renter_page_removes_renter(client):
+    ann = make_renter(client, "Ann", "ann@example.com")
+    bob = make_renter(client, "Bob", "bob@example.com")
+    resp = client.post(f"/ui/renters/{ann['id']}/delete")
+    assert resp.status_code == 302
+    remaining = client.get("/renters").get_json()
+    assert [r["id"] for r in remaining] == [bob["id"]]
+
+
+def test_delete_renter_page_unknown_id_changes_nothing(client):
+    ann = make_renter(client)
+    resp = client.post("/ui/renters/999/delete")
+    assert resp.status_code == 302
+    assert [r["id"] for r in client.get("/renters").get_json()] == [ann["id"]]
+
+
+def test_rentals_form_rejects_checkout_when_no_units_left(client):
+    equip = make_equipment(client, units=1)
+    renter = make_renter(client)
+    client.post(
+        "/rentals", json={"equipment_id": equip["id"], "renter_id": renter["id"]}
+    )
+    resp = client.post(
+        "/ui/rentals",
+        data={"equipment_id": equip["id"], "renter_id": renter["id"]},
+    )
+    assert resp.status_code == 400
+    after = client.get(f"/equipment/{equip['id']}").get_json()
+    assert after["available_units"] == 0
+    assert len(client.get("/rentals").get_json()) == 1
