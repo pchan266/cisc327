@@ -15,7 +15,12 @@ def list_renters():
 def create_renter():
     data = request.get_json()
     renter_id = store.next_id("renter")
-    renter = Renter(id=renter_id, name=data["name"], email=data["email"])
+    renter = Renter(
+        id=renter_id,
+        name=data["name"],
+        email=data["email"],
+        phone=data.get("phone"),
+    )
     store.renters[renter_id] = renter
     return jsonify(renter.to_dict()), 201
 
@@ -36,6 +41,7 @@ def update_renter(renter_id):
     data = request.get_json()
     renter.name = data.get("name", renter.name)
     renter.email = data.get("email", renter.email)
+    renter.phone = data.get("phone", renter.phone)
     return jsonify(renter.to_dict())
 
 
